@@ -1,0 +1,13 @@
+.env
+*.db
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+*.log
+
+# The prospect list is not published. It names companies that have not been
+# contacted, alongside internal qualification notes about them; a public copy
+# is visible to every one of them and is indexed forever.
+targets.csv
