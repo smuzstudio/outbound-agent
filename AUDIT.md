@@ -34,7 +34,7 @@ An agent passes only if all four are answerable **from data, by a check containi
 
 **One agent inspected. As audited it could not answer any of the four
 questions.** All nine findings now have a fix in place and the assertion set
-of §4 runs against it as [`runproof`](../runproof), which since 3 Sep also
+of §4 runs against it as [`runproof`](https://github.com/smuzstudio/runproof), which since 3 Sep also
 mails a failing report to a named human at `hello@smuz.io`.
 
 Ownership stays ⚠ anyway, and the reason is worth stating plainly: **the

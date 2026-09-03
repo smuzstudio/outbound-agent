@@ -66,7 +66,7 @@ README claimed a guarantee the code did not provide:
   the slot inside one `BEGIN IMMEDIATE` transaction. Concurrent callers
   serialise instead of both reading `n < cap` and both proceeding.
 
-Neither is trusted on its own: [`runproof`](../runproof) asserts the outcome
+Neither is trusted on its own: [`runproof`](https://github.com/smuzstudio/runproof) asserts the outcome
 from the database afterwards (A5), independently of the in-process check.
 
 ## What's in the box
@@ -139,7 +139,7 @@ at the end, with source, counts, status, cost and any error. Nothing else in
 this repo can tell you whether this morning's run happened —
 `>> outbound.log` is not an answer, because nobody reads it.
 
-[`runproof`](../runproof) reads that ledger and asserts eleven properties
+[`runproof`](https://github.com/smuzstudio/runproof) reads that ledger and asserts eleven properties
 with no model involved: that a run started in the expected window, finished
 `ok`, discovered at least one lead, left no lead abandoned, stayed under the
 cap and the cost ceiling, sent nothing real from a rehearsal, recorded a
