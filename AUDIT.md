@@ -70,6 +70,13 @@ The agent is thoughtfully built — the dedupe, the cap, the dry-run default and
 Remediation is listed here rather than folded into each finding, so the audit
 still reads as it did on the day it was written.
 
+**Every entry in the right-hand column is test evidence.** This agent has not
+yet run on a schedule — there is no crontab and no production database, so the
+`runs` ledger F2 added is empty. Stating that here rather than leaving it to be
+discovered: a fix verified by a test that breaks it is a weaker claim than a
+fix verified by a month of rows, and the distance between those two claims is
+the entire subject of this document.
+
 | | Fix | Evidence it works |
 |---|---|---|
 | F2, F9 | `runs` table written at start and updated at finish, carrying source, status, cost and error. `run_id` stamped on `leads` and `sends` | Throughput is *counted from rows* rather than read from a number the run reported about itself — a run cannot lie about its own output |
