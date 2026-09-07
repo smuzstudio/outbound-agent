@@ -65,7 +65,7 @@ class Settings:
     # Countries whose national law requires prior consent for unsolicited
     # commercial email. See jurisdiction.py for why this is code and not prompt.
     marketing_excluded_countries: str = os.getenv(
-        "MARKETING_EXCLUDED_COUNTRIES", "PL,DE,AT")
+        "MARKETING_EXCLUDED_COUNTRIES", "PL,DE,AT,CA,AU")
 
     daily_send_cap: int = int(os.getenv("DAILY_SEND_CAP", "25"))
     dry_run: bool = _bool("DRY_RUN", True)

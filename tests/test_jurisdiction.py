@@ -53,6 +53,26 @@ class JurisdictionTests(unittest.TestCase):
         self.assertEqual(self.j.normalise("United Kingdom"), "GB")
         self.assertEqual(self.j.normalise("de"), "DE")
 
+    def test_the_shipped_default_excludes_every_consent_regime(self) -> None:
+        """The default is the rule for anyone who never writes a .env.
+
+        Every other test in this class sets the variable, so until 7 Sep 2026
+        nothing covered the shipped value — which is how Canada and Australia
+        sat in the allowed set for a week. Consent-vs-opt-out is not an EU line
+        and cannot be eyeballed from a country code, so it is pinned here.
+        """
+        os.environ.pop("MARKETING_EXCLUDED_COUNTRIES", None)
+        j = _reload("jurisdiction")
+        try:
+            for code in ("PL", "DE", "AT", "CA", "AU"):
+                allowed, why = j.may_send(code)
+                self.assertFalse(allowed, f"{code} is a consent regime")
+                self.assertEqual(why, f"jurisdiction_excluded:{code}")
+            self.assertEqual(j.may_send("US"), (True, "ok"))
+            self.assertEqual(j.may_send("GB"), (True, "ok"))
+        finally:
+            os.environ["MARKETING_EXCLUDED_COUNTRIES"] = "PL,DE,AT"
+
     def test_the_excluded_list_is_configurable(self) -> None:
         os.environ["MARKETING_EXCLUDED_COUNTRIES"] = "FR"
         j = _reload("jurisdiction")

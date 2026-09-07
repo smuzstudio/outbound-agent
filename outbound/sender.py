@@ -32,6 +32,15 @@ class IdentityMissing(RuntimeError):
     """No registered postal address configured, so no lawful send is possible."""
 
 
+#: CAN-SPAM §316.3(a)(1) requires a commercial message to identify itself as a
+#: solicitation, clearly and conspicuously, unless the recipient consented in
+#: advance — and none of ours have. It sits immediately above the opt-out so
+#: the two read as one block: this is an ad, here is how to stop it. Saying it
+#: plainly also costs nothing we want to keep; the pitch is that we do not
+#: overstate things.
+AD_IDENTIFICATION = "This is a commercial email you didn't ask for."
+
+
 def _unsubscribe_line() -> str:
     return (
         f"Don't want these? Reply 'unsubscribe' and you're off the list for good, "
@@ -65,6 +74,7 @@ def _with_footer(body: str) -> str:
     )
     return (
         f"{body.rstrip()}{sig}\n"
+        f"{AD_IDENTIFICATION}\n"
         f"{_unsubscribe_line()}\n"
         f"How we found you and what we hold: {settings.privacy_policy_url}\n"
     )

@@ -4,12 +4,24 @@ GDPR governs the personal data. Whether an unsolicited commercial email may be
 sent at all is national law implementing the ePrivacy Directive, and it differs
 by the RECIPIENT's country, not ours:
 
+The division that matters is CONSENT vs OPT-OUT, and it is not an EU/non-EU
+line — three of the consent regimes below are outside the EU entirely:
+
   - Poland (PKE, in force Nov 2024) requires prior consent for direct marketing
     to an end user, read broadly enough to cover B2B mail to a named person.
   - Germany and Austria (UWG) require consent too.
+  - Canada (CASL) requires express or implied consent BEFORE the first message,
+    at up to CAD 10M per violation. There is a conspicuous-publication exemption
+    (s.10(9)(b)) that plausibly covers a work address published for the role,
+    but it is a per-recipient factual test and nothing here records whether it
+    was met. Until something does, Canada is excluded.
+  - Australia (Spam Act 2003) is the same shape — express or inferred consent,
+    plus a 5-business-day unsubscribe deadline rather than 10.
   - The UK (PECR) exempts corporate subscribers, so cold B2B with a working
-    opt-out is workable.
-  - The US (CAN-SPAM) is opt-out with a required postal address.
+    opt-out is workable. Sole traders and partnerships are NOT exempt.
+  - The US (CAN-SPAM) is opt-out with a required postal address, and also
+    requires the message to identify itself as a solicitation — see
+    `sender._with_footer`, which is where that element lives.
 
 So the list below is a legal boundary, not a targeting preference, and it lives
 in code rather than in the model's prompt on purpose: a jurisdiction rule that
@@ -21,8 +33,12 @@ only the leads whose country we happened to record, which is the same as no
 rule — and the gap would be invisible, because the sends would all look fine.
 Recording the country is the discovery step's job.
 
-Reviewed 2026-09-07. This is a working boundary set by a non-lawyer; the brain
-records that a Polish/Slovak lawyer should confirm it before volume goes up.
+Reviewed 2026-09-07, when CA and AU were added to the default exclusions: the
+earlier list reasoned only about the EU, the UK and the US, so two consent
+regimes were being treated as opt-out ones. Excluding is the safe direction and
+costs nothing today, because nothing has been sent. This is a working boundary
+set by a non-lawyer; the brain records that a lawyer should confirm it, and
+re-enabling a country is a legal decision, not a config tweak.
 """
 from __future__ import annotations
 

@@ -111,6 +111,24 @@ class FooterIdentityTests(unittest.TestCase):
         self.assertIn("unsubscribe", body.lower())
         self.assertIn("/privacy", body)
 
+    def test_footer_says_the_message_is_a_solicitation(self) -> None:
+        """CAN-SPAM wants the message to admit what it is, not just who sent it.
+
+        Address and opt-out were already covered; identification was not, and
+        it is a separate required element for every recipient who has not
+        consented in advance — which is all of them.
+        """
+        sender = self._sender(
+            DRY_RUN="false",
+            SENDER_POSTAL_ADDRESS="Test s.r.o., Hlavna 1, Bratislava, IČO 12345678",
+        )
+        body = sender._with_footer("hello")
+        self.assertIn(sender.AD_IDENTIFICATION, body)
+        self.assertLess(
+            body.index(sender.AD_IDENTIFICATION), body.index("Don't want these?"),
+            "identification belongs above the opt-out, not after it",
+        )
+
     def test_dry_run_still_works_before_the_identity_is_decided(self) -> None:
         sender = self._sender(DRY_RUN="true", SENDER_POSTAL_ADDRESS="")
         self.assertIn("unsubscribe", sender._with_footer("hello").lower())
