@@ -1,12 +1,13 @@
 """CLI entrypoint: `python -m outbound.main` (or `python -m outbound`).
 
-Default behavior: discover 10 fresh YC leads, research each, send what passes
-qualification — in dry-run unless DRY_RUN=false. Override the discovery target
-with arguments:
+Default behavior: discover 10 leads from the researched cohort, research each,
+send what passes qualification — in dry-run unless DRY_RUN=false. Override the
+discovery target with arguments:
 
-    python -m outbound.main yc W25 10
-    python -m outbound.main producthunt - 5
-    python -m outbound.main apollo - 10
+    python -m outbound.main targets - 10
+    python -m outbound.main yc W25 10          # founder-era, dry-run only
+    python -m outbound.main producthunt - 5    # founder-era, dry-run only
+    python -m outbound.main apollo - 10        # founder-era, dry-run only
 
 The model interprets the args via the user message we hand it.
 """
@@ -254,13 +255,37 @@ COMMANDS = {
 }
 
 
+# Discovery sources aimed at the founder-era ICP (pre-seed founders, <=25 people).
+# Kept because they work and cost nothing to keep; fenced to dry runs because the
+# company they find is not the company we sell to. See README.
+FOUNDER_ERA_SOURCES = frozenset({"yc", "producthunt", "apollo"})
+DEFAULT_SOURCE = "targets"
+
+
 def main() -> None:
     argv = sys.argv[1:]
 
     if argv and argv[0] in COMMANDS:
         sys.exit(COMMANDS[argv[0]](argv[1:]))
 
-    source = (argv[0] if len(argv) > 0 else "yc").lower()
+    source = (argv[0] if len(argv) > 0 else DEFAULT_SOURCE).lower()
+
+    if source in FOUNDER_ERA_SOURCES and not settings.dry_run:
+        # These three discover the previous ICP: YC/ProductHunt launches and
+        # Apollo founder search at 1-20 employees, with the YC path discarding
+        # anything over 25 people. The current ICP is the inverse — 50-500
+        # employees, something running unattended on a schedule — so a live run
+        # from here sends a correct pitch to the wrong companies, and burns the
+        # address while doing it. The README says nothing should be sent from
+        # them; this is that sentence in code, because a guarantee the code does
+        # not enforce is exactly what F4 of the audit was.
+        console.print(
+            f"[red]{source!r} discovers the previous ICP — refusing to send.[/red]\n"
+            f"Use [bold]targets[/bold] for the researched cohort, or set DRY_RUN=true "
+            f"to inspect what {source!r} would return."
+        )
+        sys.exit(2)
+
     batch = argv[1] if len(argv) > 1 and argv[1] != "-" else None
     n = int(argv[2]) if len(argv) > 2 else 10
 

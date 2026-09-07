@@ -5,7 +5,10 @@ A Claude-Agent-SDK workflow that finds leads, researches each one, and writes a 
 > **Use the `targets` source. The other three are still aimed at the previous ICP.**
 > `scrapers.py` reads YC, ProductHunt and Apollo founder search, and the YC path discards
 > companies over 25 people — the inverse of the current target (50–500 employees, something
-> running unattended on a schedule). **Nothing should be sent from those three.**
+> running unattended on a schedule). **Nothing is sent from those three:** since 7 Sep 2026
+> `main.py` refuses a live run from `yc`, `producthunt` or `apollo` and exits 2, and `targets`
+> is the default when no source is given. They stay usable under `DRY_RUN=true`, because
+> refusing to look at them would be deleting them rather than fencing them.
 >
 > `targets` (added 7 Sep 2026) reads the researched cohort from `targets.csv` and is aimed at
 > the current ICP. It emits only rows carrying both a country and a website: as of 7 Sep that
@@ -35,20 +38,15 @@ cp .env.example .env
 ## Run
 
 ```bash
-# Default: 10 YC leads, most-recent batches
+# Default: 10 leads from the researched cohort (current ICP). Tier A by default.
 python -m outbound
-
-# Specific YC batch
-python -m outbound yc W25 10
-
-# Recent ProductHunt launches
-python -m outbound producthunt - 5
-
-# Apollo.io search (requires APOLLO_API_KEY; free tier works)
-python -m outbound apollo - 10
-
-# The researched cohort (current ICP). Tier A by default.
 python -m outbound targets - 10
+
+# The three below are founder-era: they discover the PREVIOUS ICP, so a live run
+# from any of them exits 2. Set DRY_RUN=true to inspect what they return.
+python -m outbound yc W25 10
+python -m outbound producthunt - 5
+python -m outbound apollo - 10        # requires APOLLO_API_KEY; free tier works
 ```
 
 Each run streams progress: the LLM calls `discover_leads`, then for each lead calls `research_lead`, then either `send_email` (with its own subject + body) or `skip_lead`. You see one line per step.
@@ -60,7 +58,7 @@ A conservative outreach cadence — 15 emails/day, weekdays only:
 ```cron
 # crontab -e
 # the agent
-0  9 * * 1-5  cd ~/Desktop/Smuz/outbound-agent && /usr/bin/env -S DAILY_SEND_CAP=15 ./.venv/bin/python -m outbound yc - 15 >> ./outbound.log 2>&1
+0  9 * * 1-5  cd ~/Desktop/Smuz/outbound-agent && /usr/bin/env -S DAILY_SEND_CAP=15 ./.venv/bin/python -m outbound targets - 15 >> ./outbound.log 2>&1
 # the check on it, half an hour later — it mails its own failures, so it does
 # not share the agent's log file or the agent's fate
 30 9 * * 1-5  cd ~/Desktop/Smuz/runproof && ./.venv/bin/python -m runproof check -p runproof/profiles/outbound.toml >> ./runproof.log 2>&1
@@ -89,7 +87,7 @@ from the database afterwards (A5), independently of the in-process check.
 | `outbound/main.py` | CLI entry; spins up the Claude Agent SDK loop. |
 | `outbound/prompts.py` | System prompt + voice rules. **Edit this to tune messaging.** |
 | `outbound/tools.py` | The five tools exposed to Claude: discover, research, send, skip, list. |
-| `outbound/scrapers.py` | YC (via `yc-oss` JSON mirror), ProductHunt (RSS, GraphQL fallback), Apollo.io (free-tier search). Aimed at the **previous** ICP. |
+| `outbound/scrapers.py` | YC (via `yc-oss` JSON mirror), ProductHunt (RSS, GraphQL fallback), Apollo.io (free-tier search). Aimed at the **previous** ICP, so `main.py` fences all three to dry runs. |
 | `outbound/cohort.py` | The researched cohort from `targets.csv`. Reads only — it never invents a country or a domain, and reports what it held back. |
 | `outbound/enrichment.py` | Fetch company site + best-guess founder email (Hunter.io optional). |
 | `outbound/sender.py` | Resend (preferred) or Gmail/Workspace SMTP. Auto-appends footer + unsubscribe. Distinguishes definitive rejection from an ambiguous outcome. |
