@@ -190,7 +190,28 @@ single-process test cannot observe a race.
 
 ## Compliance
 
-- Every email gets a Smuz footer + a "reply 'unsubscribe' to opt out" line (`sender.py:_with_footer`).
+- Every email carries the sender footer, the controller's registered postal
+  address, an opt-out line and a `List-Unsubscribe` header (`sender.py:_with_footer`).
+- **A real send refuses to run without `SENDER_POSTAL_ADDRESS`** (`IdentityMissing`).
+  A commercial email to a named person must carry the sender's registered identity;
+  a run that sent fifteen emails without it would report success and produce
+  fifteen unlawful messages. Dry runs are exempt so rehearsals work before the
+  identity is settled.
+- **Opt-outs are a table, not a memory.** `suppressions` is checked before the
+  daily cap is claimed, in both the send and the discovery path, matching on
+  address *and* on whole domain — one person opting out speaks for the company.
+  Removal deactivates the row rather than deleting it: the evidence that a
+  request was honoured is the part that matters later. See AUDIT.md F10.
+
+  ```bash
+  python -m outbound suppress someone@acme.com unsubscribe "replied 7 Sep"
+  python -m outbound suppress @acme.com complaint
+  python -m outbound suppressions
+  ```
+
+  Reply-reading is still manual: someone has to see the reply and run that
+  command. Automatic ingestion is not built, and saying so is cheaper than
+  discovering it.
 - `already_contacted()` blocks repeat sends per-address and per-domain, and
   counts a reservation whose outcome is unknown as contact.
 - Sender identity (name + reply-to + physical operator) lives in `.env`. CAN-SPAM and most equivalents require a real reply path and an opt-out — both are wired.

@@ -28,17 +28,54 @@ class TransportAmbiguous(RuntimeError):
     """
 
 
-UNSUBSCRIBE_LINE = (
-    "If you'd rather not hear from us, just reply 'unsubscribe' and we'll remove you."
-)
+class IdentityMissing(RuntimeError):
+    """No registered postal address configured, so no lawful send is possible."""
+
+
+def _unsubscribe_line() -> str:
+    return (
+        f"Don't want these? Reply 'unsubscribe' and you're off the list for good, "
+        f"or mail {settings.unsubscribe_email} with 'unsubscribe' in the subject."
+    )
 
 
 def _with_footer(body: str) -> str:
+    """Append sender identity, opt-out, and where the data came from.
+
+    Raises IdentityMissing when SENDER_POSTAL_ADDRESS is unset. A commercial
+    email to a named person has to carry the sender's registered identity —
+    GDPR Art. 13/14, CAN-SPAM, and every national marketing rule agree on that
+    much. Sending without it would be the exact shape of failure this repo
+    exists to catch: the run reports success and every message it produced was
+    unlawful. Refusing loudly costs one env var; the alternative costs the
+    domain. Dry runs are exempt: a rehearsal has to work before the identity
+    is decided, and it reaches nobody.
+    """
+    if not settings.dry_run and not settings.sender_postal_address.strip():
+        raise IdentityMissing(
+            "SENDER_POSTAL_ADDRESS is not set. A real send needs the controller's "
+            "registered name and postal address in the footer; refusing to send "
+            "without it. Set it in .env, or run with DRY_RUN=true."
+        )
+    address = settings.sender_postal_address.strip() or "[SENDER_POSTAL_ADDRESS unset — dry run]"
     sig = (
         f"\n\n— {settings.sender_name}\n"
         f"{settings.sender_company} · {settings.sender_booking_url}\n"
+        f"{address}\n"
     )
-    return f"{body.rstrip()}{sig}\n{UNSUBSCRIBE_LINE}\n"
+    return (
+        f"{body.rstrip()}{sig}\n"
+        f"{_unsubscribe_line()}\n"
+        f"How we found you and what we hold: {settings.privacy_policy_url}\n"
+    )
+
+
+def _unsubscribe_headers() -> dict:
+    """RFC 8058 one-click-ish opt-out. Mailto only: a URL would need an
+    endpoint that actually removes the address, and we don't have one."""
+    return {
+        "List-Unsubscribe": f"<mailto:{settings.unsubscribe_email}?subject=unsubscribe>",
+    }
 
 
 def send_email(to_email: str, subject: str, body: str) -> dict:
@@ -68,6 +105,7 @@ def _send_resend(to_email: str, subject: str, body: str) -> dict:
         "subject": subject,
         "text": body,
         "reply_to": settings.sender_reply_to,
+        "headers": _unsubscribe_headers(),
     }
     try:
         with httpx.Client(timeout=30.0) as client:
@@ -96,6 +134,8 @@ def _send_smtp(to_email: str, subject: str, body: str) -> dict:
     msg["To"] = to_email
     msg["Subject"] = subject
     msg["Reply-To"] = settings.sender_reply_to
+    for key, value in _unsubscribe_headers().items():
+        msg[key] = value
 
     # Generate the id ourselves, BEFORE sending. Neither EmailMessage nor
     # smtplib.send_message() sets Message-ID — the receiving MTA does, and we

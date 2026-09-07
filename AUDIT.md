@@ -33,7 +33,7 @@ An agent passes only if all four are answerable **from data, by a check containi
 | `outbound` — **after alerting, 3 Sep** | ✓ | ✓ | ✓ | ⚠ | **Verifiable; owner named, delivery not yet proven** |
 
 **One agent inspected. As audited it could not answer any of the four
-questions.** All nine findings now have a fix in place and the assertion set
+questions.** All ten findings now have a fix in place and the assertion set
 of §4 runs against it as [`runproof`](https://github.com/smuzstudio/runproof), which since 3 Sep also
 mails a failing report to a named human at `hello@smuz.io`.
 
@@ -48,7 +48,7 @@ before. See F5.
 
 The agent is thoughtfully built — the dedupe, the cap, the dry-run default and the compliance footer all show someone who has thought about consequences. But **none of its safety properties are verifiable after the fact, and two of them do not hold.** The README documents a guarantee the code does not provide.
 
-**9 findings: 3 critical, 3 high, 3 medium.**
+**10 findings: 4 critical, 3 high, 3 medium.** F10 was found on 7 Sep, in a second pass.
 
 | # | Finding | Class | Severity | Status |
 |---|---|---|---|---|
@@ -61,6 +61,7 @@ The agent is thoughtfully built — the dedupe, the cap, the dry-run default and
 | F7 | SMTP sends always record `provider_message_id = NULL` | Effect | Medium | **Fixed 2026-08-31** |
 | F8 | Send-then-record is not atomic in the failure direction | Effect | Medium | **Fixed 2026-08-31** |
 | F9 | Per-run cost is printed and discarded | Ownership | Medium | **Fixed 2026-08-31** |
+| F10 | The footer promises removal on request; nothing implements it | Effect | **Critical** | **Fixed 2026-09-07** |
 
 ---
 
@@ -76,6 +77,7 @@ still reads as it did on the day it was written.
 | F4 | Count and claim moved into one `BEGIN IMMEDIATE` transaction; exclusive `flock` on the run lock makes concurrent runs impossible as well as safe | `test_concurrent_processes_cannot_oversend`: 20 processes, cap 5 → exactly 5. The same load against the old check-then-act shape produces 9 |
 | F6, F8 | Slot claimed before the transport call, confirmed after. Transport errors are returned to the model as tool results instead of aborting the run | `test_unconfirmed_reservation_still_counts`, `test_released_send_does_not_count`, and A11 |
 | F7 | Message id generated with `make_msgid()` and set on the message *before* sending | A7 asserts every delivered mail carries one |
+| F10 | `suppressions` table, checked before the cap is claimed in both the send and the discovery path; opt-outs recorded by `python -m outbound suppress`; the footer now also carries the controller's registered address and a `List-Unsubscribe` header | 13 tests in `tests/test_suppressions.py`, each breaking one way of failing to honour a removal — case, domain scope, bypass by address, and deletion destroying the record |
 | F5 | Assertion runner mails the failing report to a named owner; an undelivered alert exits `3`, distinct from both pass and fail | 15 tests in `runproof/tests/test_alert.py` break delivery specifically — missing credentials, refused connection, half-configured block. **No live send yet** — see below |
 
 **On F6/F8 and the ambiguous case.** A send is claimed before the transport
@@ -218,6 +220,22 @@ delivered message — see §1b.
 
 ---
 
+### F10 — The unsubscribe promise has no mechanism behind it · **Critical**
+
+*Found 2026-09-07, in the second pass over this repo. Recorded here rather than
+in a new document: an audit that quietly grows a tenth finding is more honest
+than one that stays at nine.*
+
+**Evidence.** `sender.py:32` appends "reply 'unsubscribe' and we'll remove you" to every message. There is no suppression table in `storage.py`, no check in the send path, and no code path anywhere that reads a reply. The removal is performed by the operator remembering.
+
+**Failure scenario.** Someone replies "unsubscribe". Nobody is watching the mailbox that week. The address stays in `leads` with `status='sent'`, so the domain-level dedupe in `already_contacted()` holds — until the next discovery run finds a *different* person at the same company, or the lead is re-imported from another source, at which point they are contacted again by a system that told them they had been removed.
+
+**Why it belongs in this audit.** It is the same failure class as F3, one layer up. The run reports success, the numbers look healthy, and the thing the operator believes is happening — opt-outs being honoured — is not happening at all. It is also the only finding here with a legal consequence: under GDPR the promise in that footer is a commitment to the data subject, and a commitment kept by memory is not kept.
+
+**Fix.** A `suppressions` table checked *before* the daily cap is claimed, at both the send and the discovery step, matching on address and on whole domain. Removal deactivates rather than deletes, because the evidence that a request was honoured is the only thing that can be shown later. Assertion A12 in §4.
+
+---
+
 ## 3. What's already right
 
 An audit that finds only problems is a sales document. These are genuinely good and should not be changed:
@@ -247,6 +265,7 @@ Ten deterministic checks. **No model in any of them.** Each is a SQL query or a 
 | **A9** | `cost_usd <= ceiling` for the run | Runaway loop (F9) |
 | **A10** | Most recent `status='ok'` run is under 26 hours old on a weekday | Everything above, as a backstop |
 | **A11** | No send from a finished run is still `reserved` | The crash window between claiming a send slot and confirming its outcome (F8) |
+| **A12** | No real send exists to an address, or at a domain, carrying an active suppression | An opt-out recorded but not honoured (F10) — the one failure here the recipient can see and report |
 
 **A8 is the one that matters most.** It is the only assertion whose failure is visible to someone outside the company.
 

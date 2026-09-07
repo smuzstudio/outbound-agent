@@ -55,6 +55,11 @@ async def discover_leads(args: dict) -> dict:
         # Skip if we've ever contacted anyone at this domain.
         if storage.already_contacted(None, lead.get("company_domain")):
             continue
+        # …or if anyone there has opted out. Discovering, researching and
+        # drafting for a suppressed domain costs API spend and produces an
+        # email that must never be sent.
+        if storage.is_suppressed(lead.get("founder_email"), lead.get("company_domain")):
+            continue
         lead_id = storage.upsert_lead(
             source=lead["source"],
             source_ref=lead["source_ref"],
@@ -157,6 +162,17 @@ async def send_email_tool(args: dict) -> dict:
         storage.update_lead(lead_id, status="skipped", skip_reason="already_contacted")
         return _text({"lead_id": lead_id, "status": "skipped", "reason": "already_contacted"})
 
+    # Opt-outs are checked before the cap is claimed. A suppressed address that
+    # consumed a slot would make honouring an unsubscribe look, in the numbers,
+    # exactly like a day of failed sends.
+    hit = storage.is_suppressed(to_email, lead.get("company_domain"))
+    if hit:
+        storage.update_lead(lead_id, status="skipped", skip_reason="suppressed")
+        return _text({"lead_id": lead_id, "status": "skipped", "reason": "suppressed",
+                      "suppression": {"reason": hit["reason"],
+                                      "scope": "email" if hit["email"] else "domain"},
+                      "note": "never contact this address or domain again"})
+
     # Claim the slot before sending, not after. Two things follow from that
     # order: the cap becomes atomic (the count and the claim are one
     # transaction), and a crash mid-send leaves a row behind rather than a
@@ -174,6 +190,13 @@ async def send_email_tool(args: dict) -> dict:
 
     try:
         result = sender.send_email(to_email=to_email, subject=subject, body=body)
+    except sender.IdentityMissing as exc:
+        # Configuration, not transport: nothing was attempted. Free the slot and
+        # stop — every subsequent send in this run would fail the same way.
+        storage.release_send(send_id, error=str(exc))
+        return _text({"lead_id": lead_id, "status": "blocked", "error": str(exc),
+                      "note": "stop the run; this is a configuration problem, "
+                              "not a problem with this lead"})
     except sender.TransportRejected as exc:
         # The transport refused it outright; nothing was queued. Free the slot
         # so the cap isn't spent on a message that never existed.

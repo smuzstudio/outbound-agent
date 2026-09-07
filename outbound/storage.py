@@ -64,6 +64,34 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+
+-- Opt-outs, and every other address we must never contact again.
+--
+-- The footer has promised "reply unsubscribe and we'll remove you" since the
+-- first version, with nothing behind it: the promise was kept by memory, and
+-- memory is not a mechanism. An opt-out that depends on someone remembering
+-- is the same failure class this repo audits itself for — a step that reports
+-- success while doing nothing.
+--
+-- Suppression is by address AND by domain, because an opt-out from one person
+-- at a company is a signal about the company, not just the inbox. Rows are
+-- never deleted on removal: `active = 0` keeps the record that the request was
+-- made and honoured, which is the only thing that can be shown to a regulator.
+CREATE TABLE IF NOT EXISTS suppressions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT,                          -- lowercased, or NULL for a domain-wide entry
+    domain TEXT,                         -- lowercased
+    reason TEXT NOT NULL,                -- unsubscribe | bounce | complaint | manual | jurisdiction
+    source TEXT,                         -- who/what added it, free text
+    note TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_suppressions_email
+    ON suppressions(email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_suppressions_domain
+    ON suppressions(domain) WHERE domain IS NOT NULL AND email IS NULL;
 """
 
 # Columns added after the first release. Stamped onto leads and sends so that
@@ -268,6 +296,107 @@ def already_contacted(email: str | None, domain: str | None) -> bool:
             if row:
                 return True
     return False
+
+
+# --- Suppression -------------------------------------------------------------
+#
+# Checked before the cap is claimed, not after. A suppressed address must not
+# consume a slot: spending today's cap discovering that fifteen people opted
+# out would make the opt-out list look like a delivery failure.
+
+SUPPRESSION_REASONS = ("unsubscribe", "bounce", "complaint", "manual", "jurisdiction")
+
+
+def suppress(
+    *, email: str | None = None, domain: str | None = None, reason: str = "manual",
+    source: str | None = None, note: str | None = None,
+) -> int:
+    """Record an address or a whole domain as never-contact. Idempotent."""
+    if not email and not domain:
+        raise ValueError("suppress() needs an email or a domain")
+    if reason not in SUPPRESSION_REASONS:
+        raise ValueError(f"unknown reason {reason!r}; expected one of {SUPPRESSION_REASONS}")
+    email = email.strip().lower() if email else None
+    domain = domain.strip().lower() if domain else None
+    if email and not domain:
+        domain = email.rpartition("@")[2] or None
+    # A domain-wide entry carries no email; an address entry carries both, and
+    # the partial unique index above keeps the two kinds from colliding.
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id FROM suppressions WHERE email IS ? AND domain IS ?"
+            if email else
+            "SELECT id FROM suppressions WHERE email IS NULL AND domain IS ?",
+            (email, domain) if email else (domain,),
+        ).fetchone()
+        if row:
+            con.execute(
+                "UPDATE suppressions SET active = 1, reason = ?, source = ?, note = ? WHERE id = ?",
+                (reason, source, note, row["id"]),
+            )
+            return int(row["id"])
+        cur = con.execute(
+            """INSERT INTO suppressions (email, domain, reason, source, note, active, created_at)
+               VALUES (?, ?, ?, ?, ?, 1, ?)""",
+            (email, domain, reason, source, note, _now()),
+        )
+        return int(cur.lastrowid)
+
+
+def unsuppress(*, email: str | None = None, domain: str | None = None) -> int:
+    """Deactivate an entry, keeping the row. Returns rows affected."""
+    email = email.strip().lower() if email else None
+    domain = domain.strip().lower() if domain else None
+    with _conn() as con:
+        if email:
+            cur = con.execute(
+                "UPDATE suppressions SET active = 0 WHERE email = ?", (email,))
+        else:
+            cur = con.execute(
+                "UPDATE suppressions SET active = 0 WHERE domain = ? AND email IS NULL",
+                (domain,))
+        return int(cur.rowcount)
+
+
+def is_suppressed(email: str | None, domain: str | None = None) -> dict | None:
+    """Return the matching active suppression, or None.
+
+    An address matches its own entry or any domain-wide entry. The domain is
+    derived from the address when not given, so a caller cannot bypass a
+    domain block by passing the address alone.
+    """
+    email = email.strip().lower() if email else None
+    domain = (domain or "").strip().lower() or None
+    if email and not domain:
+        domain = email.rpartition("@")[2] or None
+    if not email and not domain:
+        return None
+    with _conn() as con:
+        if email:
+            row = con.execute(
+                "SELECT * FROM suppressions WHERE active = 1 AND email = ? LIMIT 1",
+                (email,),
+            ).fetchone()
+            if row:
+                return dict(row)
+        if domain:
+            row = con.execute(
+                """SELECT * FROM suppressions
+                   WHERE active = 1 AND email IS NULL AND domain = ? LIMIT 1""",
+                (domain,),
+            ).fetchone()
+            if row:
+                return dict(row)
+    return None
+
+
+def list_suppressions(active_only: bool = True, limit: int = 500) -> list[dict]:
+    with _conn() as con:
+        sql = "SELECT * FROM suppressions"
+        if active_only:
+            sql += " WHERE active = 1"
+        sql += " ORDER BY id DESC LIMIT ?"
+        return [dict(r) for r in con.execute(sql, (limit,)).fetchall()]
 
 
 class CapReached(RuntimeError):

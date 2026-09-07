@@ -30,6 +30,17 @@ class Settings:
     sender_booking_url: str = os.getenv("SENDER_BOOKING_URL", "https://smuz.io")
     sender_reply_to: str = os.getenv("SENDER_REPLY_TO", "hello@smuz.io")
 
+    # The registered identity of the data controller: one line, exactly as it
+    # appears in the privacy policy and in client contracts. GDPR Art. 13/14
+    # and CAN-SPAM both require it on the message itself, and a policy naming
+    # one party while the email names another is the first thing a careful
+    # buyer notices. Unset on purpose — a real send refuses without it (see
+    # sender._with_footer); an invented address would be worse than none.
+    sender_postal_address: str = os.getenv("SENDER_POSTAL_ADDRESS", "")
+    privacy_policy_url: str = os.getenv("PRIVACY_POLICY_URL", "https://smuz.io/privacy")
+    unsubscribe_email: str = os.getenv("UNSUBSCRIBE_EMAIL", "") or os.getenv(
+        "SENDER_REPLY_TO", "hello@smuz.io")
+
     resend_api_key: str = os.getenv("RESEND_API_KEY", "")
     smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port: int = int(os.getenv("SMTP_PORT", "587"))

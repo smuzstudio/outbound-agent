@@ -28,6 +28,7 @@ from rich.rule import Rule
 
 from .config import settings
 from .prompts import system_prompt
+from . import storage
 from .storage import finish_run, init_db, run_counts, sends_today, start_run
 from .tools import ALL_TOOLS, ALLOWED_TOOL_NAMES
 
@@ -147,8 +148,61 @@ def _single_instance(lock_path: Path):
         handle.close()
 
 
+def _cmd_suppress(argv: list[str]) -> int:
+    """`suppress <email|@domain> [reason] [note...]` — honour an opt-out.
+
+    Deliberately a first-class command rather than a SQL snippet in a note
+    somewhere: the footer promises removal, and the promise needs a mechanism
+    a tired person can run in one line.
+    """
+    if not argv:
+        console.print("usage: python -m outbound suppress <email|@domain> "
+                      "[unsubscribe|bounce|complaint|manual|jurisdiction] [note]",
+                      markup=False)
+        return 2
+    target = argv[0].strip().lower()
+    reason = argv[1] if len(argv) > 1 else "unsubscribe"
+    note = " ".join(argv[2:]) or None
+    storage.init_db()
+    try:
+        if target.startswith("@"):
+            storage.suppress(domain=target[1:], reason=reason, source="cli", note=note)
+            console.print(f"[green]suppressed domain[/green] {target[1:]} ({reason})")
+        else:
+            storage.suppress(email=target, reason=reason, source="cli", note=note)
+            console.print(f"[green]suppressed[/green] {target} ({reason})")
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
+    return 0
+
+
+def _cmd_suppressions(argv: list[str]) -> int:
+    storage.init_db()
+    rows = storage.list_suppressions(active_only="--all" not in argv)
+    if not rows:
+        console.print("[yellow]no suppressions recorded[/yellow]")
+        return 0
+    for r in rows:
+        scope = r["email"] or f"@{r['domain']}"
+        flag = "" if r["active"] else " (inactive)"
+        console.print(f"{r['created_at'][:10]}  {scope}  — {r['reason']}{flag}")
+    console.print(f"\n{len(rows)} entr{'y' if len(rows) == 1 else 'ies'}")
+    return 0
+
+
+COMMANDS = {
+    "suppress": _cmd_suppress,
+    "suppressions": _cmd_suppressions,
+}
+
+
 def main() -> None:
     argv = sys.argv[1:]
+
+    if argv and argv[0] in COMMANDS:
+        sys.exit(COMMANDS[argv[0]](argv[1:]))
+
     source = (argv[0] if len(argv) > 0 else "yc").lower()
     batch = argv[1] if len(argv) > 1 and argv[1] != "-" else None
     n = int(argv[2]) if len(argv) > 2 else 10
