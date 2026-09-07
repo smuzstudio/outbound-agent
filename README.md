@@ -1,6 +1,8 @@
 # Smuz outbound agent
 
-A Claude-Agent-SDK workflow that finds early-stage founders on YC and ProductHunt, researches each one, and sends a personalized cold email pitching Smuz.
+A Claude-Agent-SDK workflow that finds leads, researches each one, and writes a cold email pitching Smuz — agent reliability: finding the scheduled agents that fail silently while still reporting success.
+
+> **The discovery sources are still aimed at the previous ICP.** `scrapers.py` reads YC, ProductHunt and Apollo founder search, and the YC path discards companies over 25 people — the inverse of the current target (50–500 employees, something running unattended on a schedule). The prompt was rewritten on 7 Sep 2026; retargeting discovery is a separate piece of work, and until it lands nothing should be sent from these sources.
 
 ```
 discover_leads  →  research_lead  →  send_email | skip_lead
@@ -8,7 +10,7 @@ discover_leads  →  research_lead  →  send_email | skip_lead
                      no templates)
 ```
 
-Single sender (`hello@smuz.io`), single product (Smuz), single goal: book a 30-minute strategy call. The model is the orchestrator AND the copywriter — the prompt at `outbound/prompts.py` is where you tune voice.
+Single sender, single product (Smuz). The ask is a question — "what runs on a schedule that nobody watches?" — not a meeting: there is no booking link and that is deliberate. The model is the orchestrator AND the copywriter; the prompt at `outbound/prompts.py` is where voice and offer live.
 
 ## Setup
 
