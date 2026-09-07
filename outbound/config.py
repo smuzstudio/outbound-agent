@@ -51,6 +51,13 @@ class Settings:
     smtp_user: str = os.getenv("SMTP_USER", "")
     smtp_password: str = os.getenv("SMTP_PASSWORD", "")
 
+    # Where replies land. Same mailbox as SENDER_REPLY_TO in the normal case;
+    # the password is a Workspace app password, never the account password.
+    imap_host: str = os.getenv("IMAP_HOST", "imap.gmail.com")
+    imap_port: int = int(os.getenv("IMAP_PORT", "993"))
+    imap_user: str = os.getenv("IMAP_USER", "")
+    imap_password: str = os.getenv("IMAP_PASSWORD", "")
+
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
     producthunt_token: str = os.getenv("PRODUCTHUNT_TOKEN", "")
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")

@@ -92,6 +92,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_suppressions_email
     ON suppressions(email) WHERE email IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_suppressions_domain
     ON suppressions(domain) WHERE domain IS NOT NULL AND email IS NULL;
+
+-- What came back. Four numbers are worth having — delivered, bounced, replied,
+-- and of those replies how many were a person rather than a robot — and none
+-- of them can be read from `sends`, which only records that we handed a message
+-- to a transport.
+--
+-- Deliberately NOT here: open tracking. A pixel needs consent under ePrivacy,
+-- Apple Mail Privacy Protection makes the number fiction, and remote images
+-- cost deliverability. A metric that is both unlawful and wrong is worse than
+-- no metric.
+--
+-- Message bodies are not stored. A reply is a named person's words about their
+-- own systems; the classification and the fact of it are enough to operate on,
+-- and every field kept here is a field that has to be defended later.
+CREATE TABLE IF NOT EXISTS replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    send_id INTEGER REFERENCES sends(id),   -- NULL when it matches nothing we sent
+    from_email TEXT NOT NULL,
+    subject TEXT,
+    kind TEXT NOT NULL,                     -- human | bounce | auto | unsubscribe
+    in_reply_to TEXT,
+    message_id TEXT,
+    received_at TEXT NOT NULL,
+    ingested_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_replies_message_id
+    ON replies(message_id) WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_replies_send ON replies(send_id);
 """
 
 # Columns added after the first release. Stamped onto leads and sends so that
@@ -108,6 +137,10 @@ MIGRATIONS = [
     # ISO-3166 alpha-2, or NULL when discovery could not determine it. NULL is
     # a refusal at send time, not a shrug: see jurisdiction.py.
     ("leads", "country", "ALTER TABLE leads ADD COLUMN country TEXT"),
+    # What the transport said afterwards: delivered | bounced | complained.
+    # NULL means nobody has asked yet, which is different from "fine".
+    ("sends", "delivery_status", "ALTER TABLE sends ADD COLUMN delivery_status TEXT"),
+    ("sends", "delivery_checked_at", "ALTER TABLE sends ADD COLUMN delivery_checked_at TEXT"),
 ]
 
 # A send is claimed before the transport call and confirmed after it. These
@@ -402,6 +435,116 @@ def list_suppressions(active_only: bool = True, limit: int = 500) -> list[dict]:
             sql += " WHERE active = 1"
         sql += " ORDER BY id DESC LIMIT ?"
         return [dict(r) for r in con.execute(sql, (limit,)).fetchall()]
+
+
+# --- What came back ----------------------------------------------------------
+
+def find_send_by_message_id(message_id: str | None) -> dict | None:
+    """Match an inbound In-Reply-To header back to the send it answers."""
+    if not message_id:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM sends WHERE provider_message_id = ? LIMIT 1",
+            (message_id.strip(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def record_reply(
+    *, from_email: str, kind: str, subject: str | None = None,
+    send_id: int | None = None, in_reply_to: str | None = None,
+    message_id: str | None = None, received_at: str | None = None,
+) -> int | None:
+    """Store one inbound message. Returns None if we already had it.
+
+    Idempotent on Message-ID so that re-running ingestion over the same mailbox
+    window — which is the normal case, since IMAP flags are not ours to trust —
+    cannot double-count replies or re-open a closed thread.
+    """
+    with _conn() as con:
+        if message_id:
+            row = con.execute(
+                "SELECT id FROM replies WHERE message_id = ?", (message_id,)
+            ).fetchone()
+            if row:
+                return None
+        cur = con.execute(
+            """INSERT INTO replies (send_id, from_email, subject, kind, in_reply_to,
+                                    message_id, received_at, ingested_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (send_id, from_email.strip().lower(), subject, kind, in_reply_to,
+             message_id, received_at or _now(), _now()),
+        )
+        return int(cur.lastrowid)
+
+
+def set_delivery_status(send_id: int, status: str) -> None:
+    with _conn() as con:
+        con.execute(
+            "UPDATE sends SET delivery_status = ?, delivery_checked_at = ? WHERE id = ?",
+            (status, _now(), send_id),
+        )
+
+
+def sends_awaiting_delivery_status(provider: str = "resend", limit: int = 200) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """SELECT id, provider_message_id, sent_at FROM sends
+               WHERE provider = ? AND status = ? AND provider_message_id IS NOT NULL
+                 AND (delivery_status IS NULL OR delivery_status = 'queued')
+               ORDER BY id DESC LIMIT ?""",
+            (provider, SEND_SENT, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def outbound_stats(days: int = 30) -> dict:
+    """The four numbers worth reading, plus the two that qualify them.
+
+    Rates are over *delivered* where the denominator is knowable and over sent
+    otherwise, and the dict says which — a reply rate quoted against sends when
+    a tenth bounced is a flattering number, and flattering numbers are how a
+    channel gets kept alive past the point it should have been cut.
+    """
+    with _conn() as con:
+        sent = con.execute(
+            """SELECT COUNT(*) FROM sends
+               WHERE provider != ? AND status IN (?, ?)
+                 AND sent_at >= date('now', ?)""",
+            (DRYRUN_PROVIDER, *CONTACT_STATUSES, f"-{int(days)} days"),
+        ).fetchone()[0]
+        by_delivery = dict(con.execute(
+            """SELECT COALESCE(delivery_status, 'unknown'), COUNT(*) FROM sends
+               WHERE provider != ? AND status IN (?, ?)
+                 AND sent_at >= date('now', ?)
+               GROUP BY 1""",
+            (DRYRUN_PROVIDER, *CONTACT_STATUSES, f"-{int(days)} days"),
+        ).fetchall())
+        by_kind = dict(con.execute(
+            "SELECT kind, COUNT(*) FROM replies WHERE received_at >= date('now', ?) GROUP BY 1",
+            (f"-{int(days)} days",),
+        ).fetchall())
+        suppressed = con.execute(
+            "SELECT COUNT(*) FROM suppressions WHERE active = 1").fetchone()[0]
+
+    bounced = int(by_delivery.get("bounced", 0)) + int(by_kind.get("bounce", 0))
+    human = int(by_kind.get("human", 0)) + int(by_kind.get("unsubscribe", 0))
+    delivered_known = int(by_delivery.get("delivered", 0))
+    return {
+        "days": days,
+        "sent": sent,
+        "delivered_confirmed": delivered_known,
+        "bounced": bounced,
+        "replies_human": int(by_kind.get("human", 0)),
+        "replies_unsubscribe": int(by_kind.get("unsubscribe", 0)),
+        "replies_auto": int(by_kind.get("auto", 0)),
+        "suppressions_active": suppressed,
+        "bounce_rate_of_sent": round(bounced / sent, 4) if sent else None,
+        "reply_rate_of_sent": round(human / sent, 4) if sent else None,
+        # Stated so nobody quotes a rate whose denominator was never measured.
+        "delivery_confirmed_for": f"{delivered_known}/{sent}" if sent else "0/0",
+    }
 
 
 class CapReached(RuntimeError):

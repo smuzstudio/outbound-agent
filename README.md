@@ -134,6 +134,25 @@ A slot is only released on a definitive refusal — an API 4xx, a rejected
 recipient. Timeouts, 5xx responses and dropped connections are ambiguous, so
 the reservation stands and the error is recorded on the row.
 
+## What came back
+
+`sends` records that a message was handed to a transport. It cannot say whether
+it landed, bounced, or was answered — so `replies` does, and
+`python -m outbound stats [days]` prints the four numbers worth reading:
+sent, delivery confirmed, bounced, replies split by human / opt-out / auto.
+
+Rates are printed against *sent*, and the report says how much of that was
+delivery-confirmed, because a reply rate quoted against sends when a tenth
+bounced is a flattering number — and flattering numbers are how a channel gets
+kept alive past the point it should have been cut.
+
+**Opens are not tracked, deliberately.** A tracking pixel needs consent under
+ePrivacy, Apple Mail Privacy Protection makes the number fiction, and remote
+images cost deliverability. A metric that is both unlawful and wrong is worse
+than no metric. Message bodies are not stored either: a reply is a named
+person's words about their own systems, and every field kept is a field to be
+defended later.
+
 ## Verification
 
 The agent writes a `runs` row at the start of every execution and updates it
@@ -211,9 +230,20 @@ single-process test cannot observe a race.
   python -m outbound suppressions
   ```
 
-  Reply-reading is still manual: someone has to see the reply and run that
-  command. Automatic ingestion is not built, and saying so is cheaper than
-  discovering it.
+  Replies are read by `python -m outbound ingest-replies [days]`, which
+  classifies each inbound message (human / auto / bounce / unsubscribe) and
+  **acts on an opt-out during ingestion** rather than writing it into a report
+  someone is meant to read later. It re-reads the whole window every run and is
+  idempotent on Message-ID — the seen flag belongs to whoever opened the mailbox
+  on their phone, and the opt-out read on a phone is the one that must not be
+  missed. Needs `IMAP_USER` / `IMAP_PASSWORD`; **verified by tests, not yet
+  against a live mailbox**, because the Workspace app password does not exist
+  yet.
+
+  Two classifier rules are worth knowing, because both failures are silent:
+  an out-of-office is *not* an opt-out, and only the first 600 characters of a
+  body are searched — every reply quotes our own footer, which contains the
+  word "unsubscribe", so reading the whole body would empty the list in a week.
 - **Jurisdiction is enforced in code, not in the prompt** (`jurisdiction.py`).
   Whether unsolicited commercial email may be sent at all is national law and
   depends on the *recipient's* country: Poland, Germany and Austria require

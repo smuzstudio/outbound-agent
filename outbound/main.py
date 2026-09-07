@@ -191,9 +191,66 @@ def _cmd_suppressions(argv: list[str]) -> int:
     return 0
 
 
+def _cmd_stats(argv: list[str]) -> int:
+    """`stats [days]` — the four numbers, and what is not measured."""
+    days = int(argv[0]) if argv and argv[0].isdigit() else 30
+    storage.init_db()
+    st = storage.outbound_stats(days)
+    console.print(f"[bold]last {st['days']} days[/bold]")
+    console.print(f"  sent                {st['sent']}")
+    console.print(f"  delivery confirmed  {st['delivery_confirmed_for']}")
+    console.print(f"  bounced             {st['bounced']}")
+    console.print(f"  replies (human)     {st['replies_human']}")
+    console.print(f"  replies (opt-out)   {st['replies_unsubscribe']}")
+    console.print(f"  replies (auto)      {st['replies_auto']}")
+    console.print(f"  suppressed, active  {st['suppressions_active']}")
+    if st["sent"]:
+        console.print(f"\n  bounce rate {st['bounce_rate_of_sent']:.1%} of sent"
+                      f" · reply rate {st['reply_rate_of_sent']:.1%} of sent")
+    console.print("\n[dim]Opens are not tracked, on purpose: a pixel needs consent, "
+                  "Apple MPP makes the number fiction, and remote images cost "
+                  "deliverability.[/dim]")
+    return 0
+
+
+def _cmd_ingest_replies(argv: list[str]) -> int:
+    """`ingest-replies [days]` — read the mailbox, record, and honour opt-outs."""
+    from . import inbox
+    days = int(argv[0]) if argv and argv[0].isdigit() else 7
+    storage.init_db()
+    try:
+        client = inbox.connect()
+    except Exception as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 2
+    try:
+        messages = inbox.fetch_recent(client, days=days)
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+    counts: dict[str, int] = {}
+    suppressed = 0
+    for msg in messages:
+        result = inbox.ingest(msg)
+        counts[result["kind"]] = counts.get(result["kind"], 0) + 1
+        if result.get("suppressed"):
+            suppressed += 1
+            console.print(f"[yellow]suppressed[/yellow] {result['from']} "
+                          f"({result['kind']})")
+    console.print(f"{len(messages)} message(s) in {days}d: "
+                  + ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+                  + f" · {suppressed} newly suppressed")
+    return 0
+
+
 COMMANDS = {
     "suppress": _cmd_suppress,
     "suppressions": _cmd_suppressions,
+    "stats": _cmd_stats,
+    "ingest-replies": _cmd_ingest_replies,
 }
 
 
