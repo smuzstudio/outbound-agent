@@ -105,6 +105,9 @@ MIGRATIONS = [
     # every one of them was recorded after a transport call returned.
     ("sends", "status", "ALTER TABLE sends ADD COLUMN status TEXT DEFAULT 'sent'"),
     ("sends", "error", "ALTER TABLE sends ADD COLUMN error TEXT"),
+    # ISO-3166 alpha-2, or NULL when discovery could not determine it. NULL is
+    # a refusal at send time, not a shrug: see jurisdiction.py.
+    ("leads", "country", "ALTER TABLE leads ADD COLUMN country TEXT"),
 ]
 
 # A send is claimed before the transport call and confirmed after it. These
@@ -217,6 +220,7 @@ def upsert_lead(
     founder_name: str | None = None,
     founder_email: str | None = None,
     one_liner: str | None = None,
+    country: str | None = None,
 ) -> int | None:
     """Insert a lead. Returns lead_id, or None if it already existed."""
     with _conn() as con:
@@ -230,11 +234,12 @@ def upsert_lead(
             """
             INSERT INTO leads (source, source_ref, company_name, company_url,
                                company_domain, founder_name, founder_email,
-                               one_liner, status, created_at, run_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)
+                               one_liner, country, status, created_at, run_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)
             """,
             (source, source_ref, company_name, company_url, company_domain,
-             founder_name, founder_email, one_liner, _now(), _CURRENT_RUN_ID),
+             founder_name, founder_email, one_liner, country, _now(),
+             _CURRENT_RUN_ID),
         )
         return int(cur.lastrowid)
 

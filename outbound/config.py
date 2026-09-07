@@ -38,6 +38,10 @@ class Settings:
     # sender._with_footer); an invented address would be worse than none.
     sender_postal_address: str = os.getenv("SENDER_POSTAL_ADDRESS", "")
     privacy_policy_url: str = os.getenv("PRIVACY_POLICY_URL", "https://smuz.io/privacy")
+    # The published self-audit. Empty until the repo is genuinely public: the
+    # prompt links it only when set, because a 404 in a cold email is worse
+    # than no link.
+    audit_url: str = os.getenv("AUDIT_URL", "")
     unsubscribe_email: str = os.getenv("UNSUBSCRIBE_EMAIL", "") or os.getenv(
         "SENDER_REPLY_TO", "hello@smuz.io")
 
@@ -50,6 +54,11 @@ class Settings:
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
     producthunt_token: str = os.getenv("PRODUCTHUNT_TOKEN", "")
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
+
+    # Countries whose national law requires prior consent for unsolicited
+    # commercial email. See jurisdiction.py for why this is code and not prompt.
+    marketing_excluded_countries: str = os.getenv(
+        "MARKETING_EXCLUDED_COUNTRIES", "PL,DE,AT")
 
     daily_send_cap: int = int(os.getenv("DAILY_SEND_CAP", "25"))
     dry_run: bool = _bool("DRY_RUN", True)

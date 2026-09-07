@@ -13,7 +13,7 @@ from typing import Any
 
 from claude_agent_sdk import tool
 
-from . import enrichment, scrapers, sender, storage
+from . import enrichment, jurisdiction, scrapers, sender, storage
 from .config import DRYRUN_PROVIDER, settings
 
 
@@ -69,6 +69,7 @@ async def discover_leads(args: dict) -> dict:
             founder_name=lead.get("founder_name"),
             founder_email=lead.get("founder_email"),
             one_liner=lead.get("one_liner"),
+            country=lead.get("country"),
         )
         if lead_id is not None:
             inserted.append({"lead_id": lead_id, **lead})
@@ -165,6 +166,18 @@ async def send_email_tool(args: dict) -> dict:
     # Opt-outs are checked before the cap is claimed. A suppressed address that
     # consumed a slot would make honouring an unsubscribe look, in the numbers,
     # exactly like a day of failed sends.
+    # Jurisdiction before the cap, for the same reason as suppression: a lead we
+    # may not lawfully email must not spend a slot. Checked in code rather than
+    # asked of the model — a rule the model can be talked out of is not a rule.
+    allowed, why = jurisdiction.may_send(lead.get("country"))
+    if not allowed:
+        storage.update_lead(lead_id, status="skipped", skip_reason=why)
+        note = ("record the company's country on the lead and try again"
+                if why == "jurisdiction_unknown"
+                else "national law there requires prior consent; do not email them")
+        return _text({"lead_id": lead_id, "status": "skipped", "reason": why,
+                      "note": note})
+
     hit = storage.is_suppressed(to_email, lead.get("company_domain"))
     if hit:
         storage.update_lead(lead_id, status="skipped", skip_reason="suppressed")
@@ -225,6 +238,30 @@ async def send_email_tool(args: dict) -> dict:
 
 
 @tool(
+    "set_lead_country",
+    "Record the country of the company's headquarters as an ISO-3166 alpha-2 "
+    "code (e.g. 'US', 'GB', 'NL'), or the country name. Required before a lead "
+    "can be emailed: sending is gated on jurisdiction, and an unknown country "
+    "is treated as a refusal. Use only what the research actually showed — a "
+    "guess here is a legal claim.",
+    {"lead_id": int, "country": str},
+)
+async def set_lead_country(args: dict) -> dict:
+    lead_id = int(args["lead_id"])
+    raw = (args.get("country") or "").strip()
+    code = jurisdiction.normalise(raw)
+    if not code:
+        return _text({"error": f"unrecognised country: {raw!r}. Use an ISO-3166 "
+                               f"alpha-2 code such as 'US' or 'GB'."})
+    if not storage.get_lead(lead_id):
+        return _text({"error": f"no such lead: {lead_id}"})
+    storage.update_lead(lead_id, country=code)
+    allowed, why = jurisdiction.may_send(code)
+    return _text({"lead_id": lead_id, "country": code, "may_email": allowed,
+                  "reason": why})
+
+
+@tool(
     "skip_lead",
     "Mark a lead as skipped with a short reason. Use when not a fit, no email "
     "found, or any other disqualifier. Don't email them after skipping.",
@@ -251,10 +288,12 @@ async def list_leads(args: dict) -> dict:
     return _text({"leads": storage.list_leads(status=status, limit=limit)})
 
 
-ALL_TOOLS = [discover_leads, research_lead, send_email_tool, skip_lead, list_leads]
+ALL_TOOLS = [discover_leads, research_lead, set_lead_country, send_email_tool,
+             skip_lead, list_leads]
 ALLOWED_TOOL_NAMES = [
     "mcp__outbound__discover_leads",
     "mcp__outbound__research_lead",
+    "mcp__outbound__set_lead_country",
     "mcp__outbound__send_email",
     "mcp__outbound__skip_lead",
     "mcp__outbound__list_leads",

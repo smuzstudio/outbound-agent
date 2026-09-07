@@ -212,6 +212,15 @@ single-process test cannot observe a race.
   Reply-reading is still manual: someone has to see the reply and run that
   command. Automatic ingestion is not built, and saying so is cheaper than
   discovering it.
+- **Jurisdiction is enforced in code, not in the prompt** (`jurisdiction.py`).
+  Whether unsolicited commercial email may be sent at all is national law and
+  depends on the *recipient's* country: Poland, Germany and Austria require
+  prior consent; the UK exempts corporate subscribers; the US is opt-out.
+  `MARKETING_EXCLUDED_COUNTRIES` holds the refusal list, and **a lead with no
+  recorded country is refused as well** — failing open would protect only the
+  leads whose country happened to get recorded, and the gap would be invisible
+  because every send would still look fine. The model records the country with
+  `set_lead_country` from what the research actually showed.
 - `already_contacted()` blocks repeat sends per-address and per-domain, and
   counts a reservation whose outcome is unknown as contact.
 - Sender identity (name + reply-to + physical operator) lives in `.env`. CAN-SPAM and most equivalents require a real reply path and an opt-out — both are wired.
