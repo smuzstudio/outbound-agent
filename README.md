@@ -2,7 +2,15 @@
 
 A Claude-Agent-SDK workflow that finds leads, researches each one, and writes a cold email pitching Smuz — agent reliability: finding the scheduled agents that fail silently while still reporting success.
 
-> **The discovery sources are still aimed at the previous ICP.** `scrapers.py` reads YC, ProductHunt and Apollo founder search, and the YC path discards companies over 25 people — the inverse of the current target (50–500 employees, something running unattended on a schedule). The prompt was rewritten on 7 Sep 2026; retargeting discovery is a separate piece of work, and until it lands nothing should be sent from these sources.
+> **Use the `targets` source. The other three are still aimed at the previous ICP.**
+> `scrapers.py` reads YC, ProductHunt and Apollo founder search, and the YC path discards
+> companies over 25 people — the inverse of the current target (50–500 employees, something
+> running unattended on a schedule). **Nothing should be sent from those three.**
+>
+> `targets` (added 7 Sep 2026) reads the researched cohort from `targets.csv` and is aimed at
+> the current ICP. It emits only rows carrying both a country and a website: as of 7 Sep that
+> is **6 of the 16 Tier A rows**, the other 10 held back for want of a website. The count is
+> reported on every run rather than left to be discovered — see `cohort.py`.
 
 ```
 discover_leads  →  research_lead  →  send_email | skip_lead
@@ -38,6 +46,9 @@ python -m outbound producthunt - 5
 
 # Apollo.io search (requires APOLLO_API_KEY; free tier works)
 python -m outbound apollo - 10
+
+# The researched cohort (current ICP). Tier A by default.
+python -m outbound targets - 10
 ```
 
 Each run streams progress: the LLM calls `discover_leads`, then for each lead calls `research_lead`, then either `send_email` (with its own subject + body) or `skip_lead`. You see one line per step.
@@ -78,7 +89,8 @@ from the database afterwards (A5), independently of the in-process check.
 | `outbound/main.py` | CLI entry; spins up the Claude Agent SDK loop. |
 | `outbound/prompts.py` | System prompt + voice rules. **Edit this to tune messaging.** |
 | `outbound/tools.py` | The five tools exposed to Claude: discover, research, send, skip, list. |
-| `outbound/scrapers.py` | YC (via `yc-oss` JSON mirror), ProductHunt (RSS, GraphQL fallback), Apollo.io (free-tier search). |
+| `outbound/scrapers.py` | YC (via `yc-oss` JSON mirror), ProductHunt (RSS, GraphQL fallback), Apollo.io (free-tier search). Aimed at the **previous** ICP. |
+| `outbound/cohort.py` | The researched cohort from `targets.csv`. Reads only — it never invents a country or a domain, and reports what it held back. |
 | `outbound/enrichment.py` | Fetch company site + best-guess founder email (Hunter.io optional). |
 | `outbound/sender.py` | Resend (preferred) or Gmail/Workspace SMTP. Auto-appends footer + unsubscribe. Distinguishes definitive rejection from an ambiguous outcome. |
 | `outbound/storage.py` | SQLite. Run ledger, send reservations, dedupe per-email AND per-domain, daily-cap accounting. |

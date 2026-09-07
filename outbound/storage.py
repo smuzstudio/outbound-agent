@@ -141,7 +141,26 @@ MIGRATIONS = [
     # NULL means nobody has asked yet, which is different from "fine".
     ("sends", "delivery_status", "ALTER TABLE sends ADD COLUMN delivery_status TEXT"),
     ("sends", "delivery_checked_at", "ALTER TABLE sends ADD COLUMN delivery_checked_at TEXT"),
+    # How the address was arrived at: hunter | site | source | guess | none.
+    # NULL means research never ran. Both NULL and 'guess' are refusals at send
+    # time -- see SENDABLE_CONFIDENCE below.
+    ("leads", "email_confidence", "ALTER TABLE leads ADD COLUMN email_confidence TEXT"),
 ]
+
+# Address provenance we are willing to mail.
+#
+# find_email() already grades every address it returns, and until now that
+# grade was computed, stored and never read: a pattern-guessed
+# `hello@{domain}` was sent exactly like a Hunter-verified hit. That is the
+# same shape of bug this repo audits itself for -- a value that reports
+# quality while nothing acts on it.
+#
+# 'guess' is refused because it is not an address, it is a hypothesis, and the
+# bounce lands on our sending domain either way. NULL is refused for the same
+# reason unknown-country is: a lead that never went through research has no
+# provenance at all, and failing open would protect only the leads we happened
+# to grade.
+SENDABLE_CONFIDENCE = ("hunter", "site", "source")
 
 # A send is claimed before the transport call and confirmed after it. These
 # two states both count as contact; only RELEASED does not.

@@ -13,7 +13,7 @@ from typing import Any
 
 from claude_agent_sdk import tool
 
-from . import enrichment, jurisdiction, scrapers, sender, storage
+from . import cohort, enrichment, jurisdiction, scrapers, sender, storage
 from .config import DRYRUN_PROVIDER, settings
 
 
@@ -27,15 +27,20 @@ def _text(payload: Any) -> dict:
     "discover_leads",
     "Discover new early-stage founder leads from a public source and store them. "
     "Returns the newly inserted leads (already-known ones are skipped). "
-    "source: 'yc' | 'producthunt' | 'apollo'. For YC you can pass batch like "
-    "'W25'. For Apollo you can pass `keywords` to bias the search.",
-    {"source": str, "limit": int, "batch": str, "keywords": str},
+    "source: 'yc' | 'producthunt' | 'apollo' | 'targets'. For YC you can pass "
+    "batch like 'W25'. For Apollo you can pass `keywords` to bias the search. "
+    "'targets' reads the researched cohort from targets.csv and takes `tiers` "
+    "(default 'A'); it invents nothing, so rows lacking a country or a website "
+    "are held back and reported rather than emitted.",
+    {"source": str, "limit": int, "batch": str, "keywords": str, "tiers": str},
 )
 async def discover_leads(args: dict) -> dict:
     source = (args.get("source") or "yc").lower()
     limit = int(args.get("limit") or 10)
     batch = args.get("batch") or None
     keywords = args.get("keywords") or None
+    tiers = tuple(t.strip() for t in (args.get("tiers") or "A").split(",") if t.strip())
+    held_back: dict | None = None
 
     if source == "yc":
         raw = scrapers.fetch_yc_companies(batch=batch, limit=limit * 3)
@@ -45,6 +50,13 @@ async def discover_leads(args: dict) -> dict:
         if not settings.apollo_api_key:
             return _text({"error": "APOLLO_API_KEY not set in .env"})
         raw = scrapers.fetch_apollo_founders(limit=limit * 2, keywords=keywords)
+    elif source == "targets":
+        held_back = cohort.summarise(tiers=tiers)
+        if not held_back["csv_present"]:
+            return _text({"error": f"no targets CSV at {held_back['csv_path']} "
+                                   "(it is gitignored; set TARGETS_CSV if it lives "
+                                   "elsewhere)"})
+        raw = cohort.load_targets(tiers=tiers, limit=limit)
     else:
         return _text({"error": f"unknown source: {source}"})
 
@@ -76,11 +88,17 @@ async def discover_leads(args: dict) -> dict:
         if len(inserted) >= limit:
             break
 
-    return _text({
+    payload = {
         "source": source,
         "inserted": len(inserted),
         "leads": inserted,
-    })
+    }
+    # Say what the cohort could NOT offer in the same breath as what it could.
+    # "6 inserted" reads like success; "6 inserted, 10 held back for want of a
+    # website" is the truth, and it names the next action.
+    if held_back is not None:
+        payload["cohort"] = held_back
+    return _text(payload)
 
 
 # --- Research ---------------------------------------------------------------
@@ -111,7 +129,8 @@ async def research_lead(args: dict) -> dict:
     if lead.get("founder_email"):
         found = {"email": lead["founder_email"], "confidence": "source",
                  "candidates": [lead["founder_email"]]}
-        storage.update_lead(lead_id, research_notes=notes, status="researched")
+        storage.update_lead(lead_id, research_notes=notes, status="researched",
+                            email_confidence="source")
     else:
         found = enrichment.find_email(
             full_name=lead.get("founder_name"),
@@ -121,6 +140,7 @@ async def research_lead(args: dict) -> dict:
         storage.update_lead(
             lead_id,
             founder_email=found.get("email"),
+            email_confidence=found.get("confidence"),
             research_notes=notes,
             status="researched",
         )
@@ -158,6 +178,26 @@ async def send_email_tool(args: dict) -> dict:
     to_email = lead.get("founder_email")
     if not to_email:
         return _text({"error": "lead has no founder_email — call research_lead first or skip"})
+
+    # Provenance before anything the send could cost. find_email() already
+    # grades every address it returns, and until now that grade was computed,
+    # stored and never read -- a pattern-guessed hello@domain went out exactly
+    # like a Hunter-verified hit. Refusing here matters more than it looks:
+    # already_contacted() dedupes by DOMAIN, so one guessed send at a company
+    # permanently blocks the real person there afterwards.
+    confidence = lead.get("email_confidence")
+    if confidence not in storage.SENDABLE_CONFIDENCE:
+        reason = "email_unverified" if confidence else "email_ungraded"
+        storage.update_lead(lead_id, status="skipped", skip_reason=reason)
+        return _text({
+            "lead_id": lead_id, "status": "skipped", "reason": reason,
+            "confidence": confidence,
+            "note": ("this address was pattern-guessed, not confirmed. Resolve the "
+                     "person's name and re-run research_lead, or skip the lead. "
+                     "Do not send to a guess"
+                     if confidence else
+                     "call research_lead first: this lead has no address provenance"),
+        })
 
     if storage.already_contacted(to_email, lead.get("company_domain")):
         storage.update_lead(lead_id, status="skipped", skip_reason="already_contacted")
