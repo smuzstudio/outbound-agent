@@ -2,6 +2,15 @@
 
 A Claude-Agent-SDK workflow that finds leads, researches each one, and writes a cold email pitching Smuz — agent reliability: finding the scheduled agents that fail silently while still reporting success.
 
+> **Status, 18 Sep 2026: retired as a channel, kept as the audited subject.**
+> Smuz stopped cold outreach of every kind on 18 Sep 2026 — no cold email, no purchased
+> contact data, no sending agent. This agent sends nothing and will not be scheduled again;
+> the researched cohort it read from (`targets.csv`, never committed) has been deleted.
+> The code stays public because it is the subject of [`AUDIT.md`](AUDIT.md): a real audit
+> of a real agent, with the ten findings, the fixes, and the assertion set that
+> [`runproof`](https://github.com/smuzstudio/runproof) checks it against. Read it as a
+> worked example, not as a tool Smuz runs.
+
 > **Use the `targets` source. The other three are still aimed at the previous ICP.**
 > `scrapers.py` reads YC, ProductHunt and Apollo founder search, and the YC path discards
 > companies over 25 people — the inverse of the current target (50–500 employees, something
@@ -53,7 +62,10 @@ Each run streams progress: the LLM calls `discover_leads`, then for each lead ca
 
 ## Daily cron
 
-A conservative outreach cadence — 15 emails/day, weekdays only:
+The schedule the agent was designed around — 15 emails/day, weekdays only — and the checks
+that sit beside it. Kept because the audit's liveness assertions are written against this
+window. **Nothing below is installed on any machine as of 18 Sep 2026**; see the status note
+at the top.
 
 ```cron
 # crontab -e

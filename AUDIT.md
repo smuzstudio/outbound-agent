@@ -4,6 +4,7 @@
 **Date:** 2026-08-29 · **Remediation verified:** 2026-08-31, 2026-09-03
 **Method:** read-only source inspection. No execution, no production data, no changes.
 **Auditor:** Smuz
+**Status of the subject:** retired 18 Sep 2026. Smuz stopped cold outreach of every kind that day, so this agent no longer runs; the audit stands as the worked example and as the source of the `runproof` assertion set. Nothing in the findings or the remediation record below was changed for the retirement.
 
 This is a real audit of our own agent, published in full — including what it found. It doubles as the reference format for a Smuz Fleet Audit. Reuse notes are at the end.
 
